@@ -2,7 +2,7 @@ name:                TaxEDSL
 version:             0.1.0.0
 -- synopsis:
 -- description:
-homepage:            https://github.com/adamCS/TaxEDSL#readme
+homepage:            https://github.com/adamConnerSax/TaxEDSL#readme
 license:             BSD3
 license-file:        LICENSE
 author:              Adam Conner-Sax
@@ -21,4 +21,4 @@ library
 
 source-repository head
   type:     git
-  location: https://github.com/adamCS/TaxEDSL
+  location: https://github.com/adamConnerSax/TaxEDSL
