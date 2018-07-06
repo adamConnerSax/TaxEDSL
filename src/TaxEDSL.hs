@@ -1,18 +1,18 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module TaxEDSL where
 
-import Control.Monad.Free (Free(..), liftF)
-import Control.Monad.State (State, runState, get, put)
-import Data.Map (Map(..))
-import Data.Ix
-import Data.Array
+import           Control.Monad.Free  (Free (..), liftF)
+import           Control.Monad.State (MonadState, State, get, put, runState)
+import           Data.Array
+import           Data.Ix
+import           Data.Map            (Map (..))
 
 
 --newtype Money = Money Double -- this should not be counted on to be this simple
-data TaxCategory = PayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Enum, Eq, Bounded, Ord, Ix)
+data TaxCategory = PayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Show, Enum, Eq, Bounded, Ord, Ix)
 
-data TaxFlow a where
-  TaxFlow :: Num a => { inFlow :: a, deductions :: a } -> TaxFlow a
+data TaxFlow a = TaxFlow { inFlow :: a, deductions :: a } deriving (Show)
 
 instance Functor TaxFlow where
   fmap f (TaxFlow i d) = TaxFlow (f i) (f d)
@@ -21,11 +21,11 @@ data TaxEDSL b a where
   GetTaxFlow :: Num b => TaxCategory -> (TaxFlow b -> a) -> TaxEDSL b a
   AddDeduction :: Num b => TaxCategory -> b -> a -> TaxEDSL b a
 
-instance Functor (TaxEDSL b) where  
-  fmap f (GetTaxFlow c g) = GetTaxFlow c  (f . g)
+instance Functor (TaxEDSL b) where
+  fmap f (GetTaxFlow c g)     = GetTaxFlow c  (f . g)
   fmap f (AddDeduction c x a) = AddDeduction c x (f a)
 
-type TaxComputation b = Free (TaxEDSL b) 
+type TaxComputation b = Free (TaxEDSL b)
 
 getTaxFlow :: Num b => TaxCategory -> TaxComputation b (TaxFlow b)
 getTaxFlow c = liftF (GetTaxFlow c id)
@@ -35,31 +35,31 @@ addDeduction c x = liftF (AddDeduction c x ())
 
 type TaxState b = Array TaxCategory (TaxFlow b)
 
-newtype TaxMonad b a = TaxMonad { unTaxMonad :: State (TaxState b) a }
+newtype TaxMonad b a = TaxMonad { unTaxMonad :: State (TaxState b) a } deriving (Functor, Applicative, Monad, MonadState (TaxState b))
 
-runTaxMonad :: TaxState b -> TaxMonad b a -> (TaxState b, a)
-runTaxMonad = runState . unTaxMonad
+runTaxMonad :: TaxState b -> TaxMonad b a -> (a, TaxState b)
+runTaxMonad s = flip runState s . unTaxMonad
 
 taxStateProgram :: Num b => Free (TaxEDSL b) b -> TaxMonad b b
 
-taxStateProgram prog = TaxMonad $ case prog of
+taxStateProgram prog = case prog of
   Free (GetTaxFlow c g) -> do
     taxFlowArray <- get
     let taxFlow = taxFlowArray ! c
-    return $ g taxFlow
+    taxStateProgram $ g taxFlow
   Free (AddDeduction c x y) -> do
     taxFlowArray <- get
     let taxFlow = taxFlowArray ! c
         newTaxFlow = (\(TaxFlow i d) -> (TaxFlow i (d+x))) taxFlow
         newTaxFlowArray = taxFlowArray // [(c,newTaxFlow)]
     put newTaxFlowArray
-    return y
-  Pure x -> return x
+    taxStateProgram y
+  Pure x -> TaxMonad $ return x
 
 testInitial :: TaxState Double
-testInitial = listArray (minBound, maxBound) [0..] // [(PayrollIncome, TaxFlow 100 10),(CapitalGain, TaxFlow 10 0)]
+testInitial = listArray (minBound, maxBound) (repeat (TaxFlow 0.0 0.0)) // [(PayrollIncome, TaxFlow 100 10),(CapitalGain, TaxFlow 10 0)]
 
-stateTax :: TaxMonad Double Double
+stateTax :: TaxComputation Double Double
 stateTax = do
   payroll <- getTaxFlow PayrollIncome
   capGain <- getTaxFlow CapitalGain
@@ -69,7 +69,7 @@ stateTax = do
   addDeduction PayrollIncome tax
   return tax
 
-fedTax :: TaxMonad Double Double  
+fedTax :: TaxComputation Double Double
 fedTax = do
   payroll <- getTaxFlow PayrollIncome
   capGain <- getTaxFlow CapitalGain
@@ -78,11 +78,11 @@ fedTax = do
       tax = 0.2 * ( net payroll + net capGain + net inheritance)
   return tax
 
-allTax :: TaxMonad Double Double
+allTax :: TaxComputation Double Double
 allTax = do
   state <- stateTax
   fed <- fedTax
   return (state + fed)
-  
-  
-  
+
+
+
