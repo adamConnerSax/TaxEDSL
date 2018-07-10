@@ -8,72 +8,56 @@
 {-# LANGUAGE TypeFamilies               #-}
 module TaxEDSL where
 
-import           Control.Monad.Free  (Free (..), liftF)
-import           Control.Monad.State (MonadState, State, get, put, runState)
+import           Money
+
+import           Control.Monad.Free   (Free (..), liftF)
+import           Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import           Control.Monad.State  (MonadState, State, get, put, runState)
 import           Data.Array
 import           Data.Ix
-import           Data.Map            (Map (..))
+import           Data.Map             (Map (..))
 
-import           Prelude             hiding ((<*>))
+import           Prelude              hiding ((<*>))
 
---newtype Money = Money Double -- this should not be counted on to be this simple
+-- These will come from here
 data TaxCategory = PayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Show, Enum, Eq, Bounded, Ord, Ix)
+data FilingStatus = Single | MarriedFilingJointly deriving (Show, Read, Enum)
 
-data Money a where
-  Money :: Fractional a => a -> Money a
+-- These will be exported so things can be converted to them
+data TaxBracketM a = BracketM (Money a) (Money a) a | TopBracket (Money a) a deriving (Show)
+data TaxBracketsM a = TaxBracketsM ![TaxBracketM a] deriving (Show) -- we don't expose this constructor
+data CapGainBandM a = CapGainBandM { marginalRateM :: a, capGainRateM :: a } deriving (Show)
+data FedCapitalGainsM a = FedCapitalGainsM { topRateM :: a, bandsM :: [CapGainBandM a] } deriving (Show)
+data MedicareSurtaxM a = MedicareSurtaxM { rateM :: a, magiThreshold :: Money a } deriving (Show)
 
-instance Show a => Show (Money a) where
-  show (Money x) = "Money " ++ show x
-
-type family SumT (a :: *) (b :: *) :: * where
-  SumT (Money a) (Money a) = Money a
-
-class (c ~ SumT a b) => HasAddition a b c where
-  (<+>) :: a -> b -> c
-  (<->) :: a -> b -> c
-
-instance Fractional a => HasAddition (Money a) (Money a) (Money a) where
-  (Money x) <+> (Money y) = Money (x+y)
-  (Money x) <-> (Money y) = Money (x-y)
-
-type family ProdT (a :: *) (b :: *) :: * where
-  ProdT a         (Money a) = Money a
-  ProdT (Money a) a         = Money a
-
-class (c ~ ProdT a b) => HasMultiplication a b c where
-  (<*>) :: a -> b -> c
-
-instance Fractional a => HasMultiplication a (Money a) (Money a) where
-  x <*> (Money y) = Money (x * y)
-
-instance (Fractional a, ProdT (Money a) a ~ (Money a)) => HasMultiplication (Money a) a (Money a) where
-  (Money x) <*> y = Money (x * y)
-
-type family DivT (a :: *) (b :: *) :: * where
-  DivT (Money a) (Money a) = a
-  DivT (Money a) a         = Money a
-
-class (c ~ DivT a b) => HasDivision a b c where
-  (</>) :: a -> b -> c
-
-instance Fractional a => HasDivision (Money a) (Money a) a where
-  (Money x) </> (Money y) = (x/y)
-
-instance (Fractional a, DivT (Money a) a ~ (Money a)) => HasDivision (Money a) a (Money a) where
-  (Money x) </> y = Money (x/y)
+data TaxRulesM a = TaxRules {_trFederal      :: TaxBracketsM a,
+                             _trPayroll      :: TaxBracketsM a,
+                             _trEstate       :: TaxBracketsM a,
+                             _trFCG          :: FedCapitalGainsM a,
+                             _trMedTax       :: MedicareSurtaxM a,
+                             _trState        :: TaxBracketsM a,
+                             _trStateCapGain :: a,
+                             _trCity         :: TaxBracketsM a
+                            } deriving (Show)
 
 data TaxFlow a = TaxFlow { inFlow :: Money a, deductions :: Money a } deriving (Show)
 
 --instance Functor TaxFlow where
 --  fmap f (TaxFlow i d) = TaxFlow (f i) (f d)
 
+-- minimal DSL
+
 data TaxEDSL b a where
   GetTaxFlow :: Fractional b => TaxCategory -> (TaxFlow b -> a) -> TaxEDSL b a
   AddDeduction :: Fractional b => TaxCategory -> Money b -> a -> TaxEDSL b a
+  GetStatus :: (FilingStatus -> a) -> TaxEDSL b a
+  GetRules :: (TaxRulesM b -> a) -> TaxEDSL b a
 
 instance Functor (TaxEDSL b) where
   fmap f (GetTaxFlow c g)     = GetTaxFlow c  (f . g)
   fmap f (AddDeduction c x a) = AddDeduction c x (f a)
+  fmap f (GetStatus g)        = GetStatus (f . g)
+  fmap f (GetRules g)         = GetRules (f .g)
 
 type TaxComputation b = Free (TaxEDSL b)
 
@@ -83,12 +67,21 @@ getTaxFlow c = liftF (GetTaxFlow c id)
 addDeduction :: Fractional b => TaxCategory -> Money b -> TaxComputation b ()
 addDeduction c x = liftF (AddDeduction c x ())
 
-type TaxState b = Array TaxCategory (TaxFlow b)
+getStatus :: Fractional b => TaxComputation b FilingStatus
+getStatus = liftF (GetStatus id)
 
-newtype TaxMonad b a = TaxMonad { unTaxMonad :: State (TaxState b) a } deriving (Functor, Applicative, Monad, MonadState (TaxState b))
+getRules :: Fractional b => TaxComputation b (TaxRulesM b)
+getRules = liftF (GetRules id)
 
-runTaxMonad :: TaxState b -> TaxMonad b a -> (a, TaxState b)
-runTaxMonad s = flip runState s . unTaxMonad
+-- Here is an implementation using Reader and State
+
+type FlowState b = Array TaxCategory (TaxFlow b)
+data TaxEnv b =  TaxEnv { _teStatus :: FilingStatus, _teRules :: TaxRulesM b }
+
+newtype TaxMonad b a = TaxMonad { unTaxMonad :: ReaderT (TaxEnv b) (State (FlowState b)) a } deriving (Functor, Applicative, Monad, MonadState (FlowState b), MonadReader (TaxEnv b))
+
+runTaxMonad :: TaxEnv b -> FlowState b -> TaxMonad b a -> (a, FlowState b)
+runTaxMonad e s tm = runState (runReaderT (unTaxMonad tm) e) s
 
 taxStateProgram :: Fractional b => Free (TaxEDSL b) (Money b) -> TaxMonad b (Money b)
 
@@ -104,10 +97,18 @@ taxStateProgram prog = case prog of
         newTaxFlowArray = taxFlowArray // [(c,newTaxFlow)]
     put newTaxFlowArray
     taxStateProgram y
+  Free (GetStatus g) -> do
+    status <- asks _teStatus
+    taxStateProgram $ g status
+  Free (GetRules g) -> do
+    rules <- asks _teRules
+    taxStateProgram (g rules)
   Pure x -> TaxMonad $ return x
 
-testInitial :: Fractional b => TaxState b
-testInitial = let f = Money in listArray (minBound, maxBound) (repeat (TaxFlow (f 0.0) (f 0.0))) //
+--
+
+testFlows :: Fractional b => FlowState b
+testFlows = let f = Money in listArray (minBound, maxBound) (repeat (TaxFlow (f 0.0) (f 0.0))) //
   [
     (PayrollIncome, TaxFlow (f 100.0) (f 10.0))
   , (CapitalGain, TaxFlow (f 10) (f 0))
