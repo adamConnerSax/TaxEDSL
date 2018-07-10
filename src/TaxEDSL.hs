@@ -13,8 +13,8 @@ import           Money
 import           Control.Monad.Free   (Free (..), liftF)
 import           Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import           Control.Monad.State  (MonadState, State, get, put, runState)
-import           Data.Array
-import           Data.Ix
+import qualified Data.Array           as A
+import           Data.Ix              (Ix)
 import           Data.Map             (Map (..))
 
 import           Prelude              hiding ((<*>))
@@ -22,6 +22,8 @@ import           Prelude              hiding ((<*>))
 -- These will come from here
 data TaxCategory = PayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Show, Enum, Eq, Bounded, Ord, Ix)
 data FilingStatus = Single | MarriedFilingJointly deriving (Show, Read, Enum)
+data BracketType = Federal | State | Local | Payroll | Estate deriving (Show, Bounded, Ord, Enum, Ix) -- Payroll does Social Security and Medicare taxes
+
 
 -- These will be exported so things can be converted to them
 data TaxBracketM a = BracketM (Money a) (Money a) a | TopBracket (Money a) a deriving (Show)
@@ -30,15 +32,11 @@ data CapGainBandM a = CapGainBandM { marginalRateM :: a, capGainRateM :: a } der
 data FedCapitalGainsM a = FedCapitalGainsM { topRateM :: a, bandsM :: [CapGainBandM a] } deriving (Show)
 data MedicareSurtaxM a = MedicareSurtaxM { rateM :: a, magiThreshold :: Money a } deriving (Show)
 
-data TaxRulesM a = TaxRules {_trFederal      :: TaxBracketsM a,
-                             _trPayroll      :: TaxBracketsM a,
-                             _trEstate       :: TaxBracketsM a,
-                             _trFCG          :: FedCapitalGainsM a,
-                             _trMedTax       :: MedicareSurtaxM a,
-                             _trState        :: TaxBracketsM a,
-                             _trStateCapGain :: a,
-                             _trCity         :: TaxBracketsM a
-                            } deriving (Show)
+data TaxRulesM a = TaxRulesM { _trBrackets     :: A.Array BracketType (TaxBracketsM a),
+                               _trFCG          :: FedCapitalGainsM a,
+                               _trMedTax       :: MedicareSurtaxM a,
+                               _trStateCapGain :: a
+                             } deriving (Show)
 
 data TaxFlow a = TaxFlow { inFlow :: Money a, deductions :: Money a } deriving (Show)
 
@@ -46,17 +44,18 @@ data TaxFlow a = TaxFlow { inFlow :: Money a, deductions :: Money a } deriving (
 --  fmap f (TaxFlow i d) = TaxFlow (f i) (f d)
 
 -- minimal DSL
+-- we could not give bracket access directly but only allow brackets applied to flows?
 
 data TaxEDSL b a where
   GetTaxFlow :: Fractional b => TaxCategory -> (TaxFlow b -> a) -> TaxEDSL b a
   AddDeduction :: Fractional b => TaxCategory -> Money b -> a -> TaxEDSL b a
-  GetStatus :: (FilingStatus -> a) -> TaxEDSL b a
-  GetRules :: (TaxRulesM b -> a) -> TaxEDSL b a
+  ApplyBrackets :: BracketType -> b -> (b -> a) -> TaxEDSL b a
+  CapGainRate :: Fractional b => b -> (b -> a)
+
 
 instance Functor (TaxEDSL b) where
   fmap f (GetTaxFlow c g)     = GetTaxFlow c  (f . g)
   fmap f (AddDeduction c x a) = AddDeduction c x (f a)
-  fmap f (GetStatus g)        = GetStatus (f . g)
   fmap f (GetRules g)         = GetRules (f .g)
 
 type TaxComputation b = Free (TaxEDSL b)
