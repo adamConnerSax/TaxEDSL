@@ -22,19 +22,19 @@ import           Prelude              hiding ((<*>))
 -- These will come from here
 data TaxCategory = PayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Show, Enum, Eq, Bounded, Ord, Ix)
 data FilingStatus = Single | MarriedFilingJointly deriving (Show, Read, Enum)
-data BracketType = Federal | State | Local | Payroll | Estate deriving (Show, Bounded, Ord, Enum, Ix) -- Payroll does Social Security and Medicare taxes
+data BracketType = Federal | State | Local | Payroll | Estate deriving (Show, Bounded, Eq, Ord, Enum, Ix) -- Payroll does Social Security and Medicare taxes
 
 
 -- These will be exported so things can be converted to them
-data TaxBracketM a = BracketM (Money a) (Money a) a | TopBracket (Money a) a deriving (Show)
+data TaxBracketM a = BracketM (Money a) (Money a) a | TopBracketM (Money a) a deriving (Show)
 data TaxBracketsM a = TaxBracketsM ![TaxBracketM a] deriving (Show) -- we don't expose this constructor
 data CapGainBandM a = CapGainBandM { marginalRateM :: a, capGainRateM :: a } deriving (Show)
 data FedCapitalGainsM a = FedCapitalGainsM { topRateM :: a, bandsM :: [CapGainBandM a] } deriving (Show)
-data MedicareSurtaxM a = MedicareSurtaxM { rateM :: a, magiThreshold :: Money a } deriving (Show)
+data MedicareSurtaxM a = MedicareSurtaxM { payrollRateM :: a, netInvRateM :: a, magiThresholdM :: Money a } deriving (Show) -- payrollRate ignored for now, included in payroll bracket
 
 data TaxRulesM a = TaxRulesM { _trBrackets     :: A.Array BracketType (TaxBracketsM a),
                                _trFCG          :: FedCapitalGainsM a,
-                               _trMedTax       :: MedicareSurtaxM a,
+                               _trMedSurtax    :: MedicareSurtaxM a,
                                _trStateCapGain :: a
                              } deriving (Show)
 
@@ -43,39 +43,79 @@ data TaxFlow a = TaxFlow { inFlow :: Money a, deductions :: Money a } deriving (
 --instance Functor TaxFlow where
 --  fmap f (TaxFlow i d) = TaxFlow (f i) (f d)
 
--- minimal DSL
--- we could not give bracket access directly but only allow brackets applied to flows?
-
+-- DSL
 data TaxEDSL b a where
-  GetTaxFlow :: Fractional b => TaxCategory -> (TaxFlow b -> a) -> TaxEDSL b a
-  AddDeduction :: Fractional b => TaxCategory -> Money b -> a -> TaxEDSL b a
-  ApplyBrackets :: BracketType -> b -> (b -> a) -> TaxEDSL b a
-  CapGainRate :: Fractional b => b -> (b -> a)
-
+  Flow       :: Fractional b => TaxCategory -> (TaxFlow b -> a) -> TaxEDSL b a -- get current flow details in bucket
+  Deduct     :: Fractional b => TaxCategory -> Money b -> a -> TaxEDSL b a -- add a deduction to a bucket.  Used to deduct, e.g., state & local taxes from fed AGI
+  FedCapGain :: Fractional b => (FedCapitalGainsM b -> a) -> TaxEDSL b a -- get the cap gain rate from AGI
+  MedSurtax  :: Fractional b => (MedicareSurtaxM b -> a) -> TaxEDSL b a -- compute the medicare surtax (payroll and inv income) from MAGI and inv invcome
+  Brackets   :: Fractional b => BracketType -> (TaxBracketsM b -> a) -> TaxEDSL b a -- get bracket.  We will not export access to this
 
 instance Functor (TaxEDSL b) where
-  fmap f (GetTaxFlow c g)     = GetTaxFlow c  (f . g)
-  fmap f (AddDeduction c x a) = AddDeduction c x (f a)
-  fmap f (GetRules g)         = GetRules (f .g)
+  fmap f (TaxFlow c g)          = TaxFlow c  (f . g)
+  fmap f (Deduct c deduction a) = Deduct c deduction (f a)
+  fmap f (FedCapGain g)         = FedCapGain (f . g)
+  fmap f (MedSurtax g)          = MedSurtax (f . g)
+  fmap f (Brackets bt g)        = Bracket bt (f . g)
 
 type TaxComputation b = Free (TaxEDSL b)
 
-getTaxFlow :: Fractional b => TaxCategory -> TaxComputation b (TaxFlow b)
-getTaxFlow c = liftF (GetTaxFlow c id)
+-- basics
+flow :: Fractional b => TaxCategory -> TaxComputation b (TaxFlow b)
+flow c = liftF (Flow c id)
 
-addDeduction :: Fractional b => TaxCategory -> Money b -> TaxComputation b ()
-addDeduction c x = liftF (AddDeduction c x ())
+deduct :: Fractional b => TaxCategory -> Money b -> TaxComputation b ()
+deduct c x = liftF (Deduct c x ())
 
-getStatus :: Fractional b => TaxComputation b FilingStatus
-getStatus = liftF (GetStatus id)
+brackets :: Fractional b => BracketType -> TaxComputation b (TaxBracketsM b)
+brackets bt = liftF (Brackets bt id)
 
-getRules :: Fractional b => TaxComputation b (TaxRulesM b)
-getRules = liftF (GetRules id)
+fedCapGain :: Fractional b => TaxComputation b (FedCapitalGainsM b)
+fedCapGain = liftF (FedCapGain id)
 
--- Here is an implementation using Reader and State
+medSurtax :: Fractional b => TaxComputation b (MedicareSurtaxM b)
+medSurtax = liftF (MedSurtax id)
 
-type FlowState b = Array TaxCategory (TaxFlow b)
-data TaxEnv b =  TaxEnv { _teStatus :: FilingStatus, _teRules :: TaxRulesM b }
+-- some helpers!
+applyBrackets :: forall b.Fractional b => BracketType -> Money b -> TaxComputation b (Money b) -- forall here for scopedTypeVars needed for (Money 0)
+applyBrackets bt inc = do
+  (TaxBracketsM bkts) <- brackets bt
+  let moneyZ = (Money 0) :: Money b
+      taxFromBracket x (BracketM b t r) = if (x <= b) then moneyZ else r * (if x > t then t <-> b else x <-> b)
+      taxFromBracket x (TopBracketM b r) = if (x <= b) then moneyZ else r * (x <-> b)
+      go :: Money b -> TaxBracketsM b -> Money b
+      go x (TaxBracketsM bs) = foldl' (\tot bkt -> tot <+> taxFromBracket x bkt) bs moneyZ
+  return $ go inc bkts
+
+applyFedCapGain :: Money b -> Money b -> TaxComputation b (Money b)
+applyFedCapGain agi invInc = do
+  margRate <- marginalRate Federal agi
+  (FedCapitalGainsM topRate bands) <- fedCapGain
+  -- we start at top rate and go lower if the given marginal rate is lower than the band rate.  But we shouldn't go up if bands out of order.
+  let f margTaxRate cgTaxRate (CapGainBandM bandRate bandCapGainRate) = if (margTaxRate <= bandRate) then min bandCapGainRate cgTaxRate else cgTaxRate
+      cgr = foldl' (f margRate) topRate bands
+  return $ cgr <*> invInc
+
+marginalRate :: Fractional b => BracketType -> Money b -> TaxComputation b b
+marginalRate bt inc = do
+  (TaxBracketsM bkts) <- brackets bt
+  let inBracket x (BracketM b _ _)  = if (x >= b) then True else False
+      inBracket x (TopBracketM b _) = if (x >= b) then True else False
+      rate (BracketM _ _ r)  = r
+      rate (TopBracketM _ r) = r
+  return $ foldl' (\mr bkt -> if inBracket inc bkt then rate bkt else mr) bkts 0
+
+-- zero for now to match old computation
+applyMedSurTax :: forall b. Fractional b => Money b -> Money b -> TaxComputation b (Money b)
+applyMedSurTax magi invInc = do
+  let moneyZ = (Money 0) :: b
+  (MedicareSurtaxM payrollRate invIncRate magiThreshold) <- medSurtax
+  return moneyZ
+
+
+-- Here is an implementation and interpreter using Reader and State
+type FlowState b = A.Array TaxCategory (TaxFlow b)
+type TaxEnv b =  TaxRulesM b
 
 newtype TaxMonad b a = TaxMonad { unTaxMonad :: ReaderT (TaxEnv b) (State (FlowState b)) a } deriving (Functor, Applicative, Monad, MonadState (FlowState b), MonadReader (TaxEnv b))
 
@@ -83,28 +123,30 @@ runTaxMonad :: TaxEnv b -> FlowState b -> TaxMonad b a -> (a, FlowState b)
 runTaxMonad e s tm = runState (runReaderT (unTaxMonad tm) e) s
 
 taxStateProgram :: Fractional b => Free (TaxEDSL b) (Money b) -> TaxMonad b (Money b)
-
 taxStateProgram prog = case prog of
-  Free (GetTaxFlow c g) -> do
+  Free (Flow c g) -> do
     taxFlowArray <- get
     let taxFlow = taxFlowArray ! c
     taxStateProgram $ g taxFlow
-  Free (AddDeduction c x y) -> do
+  Free (Deduct c x y) -> do
     taxFlowArray <- get
     let taxFlow = taxFlowArray ! c
         newTaxFlow = (\(TaxFlow i d) -> (TaxFlow i (d <+> x))) taxFlow
         newTaxFlowArray = taxFlowArray // [(c,newTaxFlow)]
     put newTaxFlowArray
     taxStateProgram y
-  Free (GetStatus g) -> do
-    status <- asks _teStatus
-    taxStateProgram $ g status
-  Free (GetRules g) -> do
-    rules <- asks _teRules
-    taxStateProgram (g rules)
+  Free (Brackets bt) -> do
+    bkts <- asks _trBrackets
+    taxStateProgram $ g (bkts A.! bt)
+  Free (MedSurtax g) -> do
+    mst <- asks _trMedSurtaxM
+    taxStateProgram $ g mst -- unimplemented for now
+  Free (FedCapGain g) -> do
+    fcg <- asks _trFedCapGainM
+    taxStateProgram $ g fcg
   Pure x -> TaxMonad $ return x
 
---
+-- Here is an example
 
 testFlows :: Fractional b => FlowState b
 testFlows = let f = Money in listArray (minBound, maxBound) (repeat (TaxFlow (f 0.0) (f 0.0))) //
