@@ -6,7 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeFamilies               #-}
-module Money
+module TaxEDSL.Money
   (
     Money(..)
   , MoneyAddition(..)

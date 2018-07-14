@@ -5,10 +5,13 @@ module Main where
 import           TaxEDSL.Core        (BracketType (..), FedCapitalGainsM (..),
                                       MedicareSurtaxM (..), TaxBracketM (..),
                                       TaxBracketsM (..), TaxCategory (..),
-                                      TaxEnv (..), TaxRulesM (..))
+                                      TaxEnv (..), TaxFlow (..), TaxFlows (..),
+                                      TaxRulesM (..), runTaxMonad,
+                                      taxReaderProgram)
 import           TaxEDSL.Money       (Money (..))
 import           TaxEDSL.TaxPolicies (basePolicy)
 
+import qualified Data.Array          as A
 
 
 testFlows :: Fractional b => TaxFlows b
@@ -37,7 +40,7 @@ testMedSurtax = let moneyZ = (Money 0) :: Money b in MedicareSurtaxM 0 0 moneyZ
 testTaxRules :: Fractional b => TaxRulesM b
 testTaxRules = TaxRulesM testBrackets testFedCapGainsM testMedSurtax 0
 
-test x = runTaxMonad (taxStateProgram x) (TaxEnv testTaxRules testFlows)
+test x = runTaxMonad (taxReaderProgram x) (TaxEnv testTaxRules testFlows)
 
 main :: IO ()
-main = putstrLn $ "basePolicy: " ++ (show $ test basePolicy)
+main = putStrLn $ "basePolicy: " ++ (show $ test $ basePolicy True)

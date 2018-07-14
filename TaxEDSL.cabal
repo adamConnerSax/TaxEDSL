@@ -15,8 +15,10 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     TaxEDSL
-                     , Money
+  ghc-options:         -Wall
+  exposed-modules:     TaxEDSL.Core
+                     , TaxEDSL.Money
+                     , TaxEDSL.TaxPolicies
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , free
@@ -24,6 +26,17 @@ library
                      , mtl
   default-language:    Haskell2010
 
+
+
+executable Test
+  hs-source-dirs: test
+  main-is: Main.hs
+  ghc-options: -Wall
+  build-depends: base >= 4.7
+               , array
+               , TaxEDSL
+  default-language: Haskell2010                                                                   
+    
 source-repository head
   type:     git
   location: https://github.com/adamConnerSax/TaxEDSL

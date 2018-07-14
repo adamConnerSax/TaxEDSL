@@ -1,22 +1,22 @@
-module TaxPolicies
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+module TaxEDSL.TaxPolicies
   (
     basePolicy
   ) where
 
-import Money (Money(..))
-import TaxEDSL (Flow (inflow),
-                BracketType(..),
-                TaxCategory(..),
-                flooredNetIncome,
-                grossIncome,
-                applyBrackets,
-                applyFedCapGain,
-                applyMedSurTax,
-                flooredNetCGAndDivs,
-                stateCapGainRate)                
-                
-                
-                
+import           TaxEDSL.Core  (BracketType (..), TaxCategory (..),
+                                TaxComputation, TaxFlow (..), TaxFlows (..),
+                                applyBrackets, applyFedCapGain, applyMedSurTax,
+                                flooredNetCGAndDivs, flooredNetFlow,
+                                flooredNetIncome, flow, grossIncome, inFlow,
+                                runTaxMonad, stateCapGainRate, taxReaderProgram)
+import           TaxEDSL.Money (Money (..), MoneyAddition (..),
+                                MoneyDivision (..), MoneyMultiplication (..))
+
+import           Control.Monad (liftM2)
+
+
 {-
 This implementation matches what's in FinanciaMC plus (NOT YET) the medicare surtax on investment income.
 It does not account for AMT or the possibility of taking standard deductions.
