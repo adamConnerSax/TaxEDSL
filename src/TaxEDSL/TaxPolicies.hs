@@ -33,9 +33,7 @@ localTax = flooredNetIncome >>= applyBrackets Local
 stateTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b)
 stateTax = do
   stateIncomeTax <- (flooredNetIncome >>= applyBrackets State)
-  stateCapGainTaxable <- flooredNetCGAndDivs
-  stateCapGainR <- stateCapGainRate
-  let stateCapGainTax = stateCapGainR |*| stateCapGainTaxable
+  stateCapGainTax <- liftM2 (|*|) stateCapGainRate flooredNetCGAndDivs
   return $ stateIncomeTax |+| stateCapGainTax
 
 allTax :: forall b.(Ord b, Fractional b) => Bool -> TaxComputation b (Money b, b)
@@ -48,9 +46,9 @@ allTax deductibleStateAndLocal = do
   fni <- flooredNetIncome
   let fedTaxable = max moneyZ (fni |-| stateAndLocalDeduction)
   fedIncomeTax <- applyBrackets Federal fedTaxable
-
   fncg <- flooredNetCGAndDivs
   fedCGTax <- applyFedCapGain fedTaxable fncg
+
 
   payrollTax <- (inFlow <$> flow OrdinaryIncome) >>= applyBrackets Payroll
   estateTax <- (flooredNetFlow <$> flow Inheritance) >>= applyBrackets Estate

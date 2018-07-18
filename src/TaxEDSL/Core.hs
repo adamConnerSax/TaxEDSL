@@ -137,9 +137,11 @@ applyFedCapGain :: (Ord b, Fractional b) => Money b -> Money b -> TaxComputation
 applyFedCapGain agi invInc = do
   margRate <- trueMarginalRate Federal agi
   (FedCapitalGainsM topRate bands) <- fedCapGain
+  let inBand margTaxRate (CapGainBandM bandRate _) = (margTaxRate <= bandRate)
+      taxRate (CapGainBandM _ rate) = rate
   -- we start at top rate and go lower if the given marginal rate is lower than the band rate.  But we shouldn't go up if bands out of order.
-  let f margTaxRate cgTaxRate (CapGainBandM bandRate bandCapGainRate) = if (margTaxRate < bandRate) then min bandCapGainRate cgTaxRate else cgTaxRate
-      cgr = foldl' (f margRate) topRate bands
+  let f cgTaxRate band = if inBand margRate band then min (taxRate band) cgTaxRate else cgTaxRate
+      cgr = foldl' f topRate bands
   return $ cgr |*| invInc
 
 marginalRate :: (Ord b, Fractional b) => BracketType -> Money b -> TaxComputation b b
