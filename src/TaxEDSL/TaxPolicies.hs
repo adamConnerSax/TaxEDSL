@@ -5,9 +5,9 @@ module TaxEDSL.TaxPolicies
     basePolicy
   ) where
 
-import           TaxEDSL.Core  (BracketType (..), TaxCategory (..),
-                                TaxComputation, TaxFlow (..), TaxFlows (..),
-                                applyBrackets, applyFedCapGain, applyMedSurTax,
+import           TaxEDSL.Core  (BracketType (..), TaxComputation, TaxFlow (..),
+                                TaxFlows (..), TaxType (..), applyBrackets,
+                                applyFedCapGain, applyMedSurTax,
                                 flooredNetCGAndDivs, flooredNetFlow,
                                 flooredNetIncome, flow, grossIncome, inFlow,
                                 runTaxMonad, stateCapGainRate, taxReaderProgram)

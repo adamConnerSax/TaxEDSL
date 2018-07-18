@@ -4,9 +4,9 @@ module Main where
 
 import           TaxEDSL.Core        (BracketType (..), FedCapitalGainsM (..),
                                       MedicareSurtaxM (..), TaxBracketM (..),
-                                      TaxBracketsM (..), TaxCategory (..),
-                                      TaxEnv (..), TaxFlow (..), TaxFlows (..),
-                                      TaxRulesM (..), runTaxMonad,
+                                      TaxBracketsM (..), TaxEnv (..),
+                                      TaxFlow (..), TaxFlows (..),
+                                      TaxRulesM (..), TaxType (..), runTaxMonad,
                                       taxReaderProgram)
 import           TaxEDSL.Money       (Money (..))
 import           TaxEDSL.TaxPolicies (basePolicy)

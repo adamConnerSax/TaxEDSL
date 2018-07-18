@@ -9,7 +9,7 @@
 module TaxEDSL.Core
   (
     TaxFlow(..)
-  , TaxCategory(..)
+  , TaxType(..)
   , BracketType(..)
   , TaxBracketsM(..)
   , TaxBracketM(..)
@@ -51,7 +51,7 @@ import           Data.Foldable        (foldl')
 import           Prelude              hiding ((<*>))
 
 -- These will come from here
-data TaxCategory = NonPayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Show, Enum, Eq, Bounded, Ord, Ix)
+data TaxType = NonPayrollIncome | OrdinaryIncome | CapitalGain | Dividend | Inheritance | Exempt deriving (Show, Enum, Eq, Bounded, Ord, Ix)
 data BracketType = Federal | State | Local | Payroll | Estate deriving (Show, Bounded, Eq, Ord, Enum, Ix) -- Payroll does Social Security and Medicare taxes
 
 
@@ -81,7 +81,7 @@ flooredNetFlow tf = let moneyZ = (Money 0) :: Money a in max moneyZ (netFlow tf)
 
 -- DSL
 data TaxEDSL b a where
-  Flow             :: Fractional b => TaxCategory -> (TaxFlow b -> a) -> TaxEDSL b a -- get current flow details in bucket
+  Flow             :: Fractional b => TaxType -> (TaxFlow b -> a) -> TaxEDSL b a -- get current flow details in bucket
   FedCapGain       :: Fractional b => (FedCapitalGainsM b -> a) -> TaxEDSL b a -- get the cap gain rate from AGI
   StateCapGainRate :: Fractional b => (b -> a) -> TaxEDSL b a -- get the state cap gain rate
   MedSurtax        :: Fractional b => (MedicareSurtaxM b -> a) -> TaxEDSL b a -- compute the medicare surtax (payroll and inv income) from MAGI and inv invcome
@@ -97,7 +97,7 @@ instance Functor (TaxEDSL b) where
 type TaxComputation b = Free (TaxEDSL b)
 
 -- basics
-flow :: Fractional b => TaxCategory -> TaxComputation b (TaxFlow b)
+flow :: Fractional b => TaxType -> TaxComputation b (TaxFlow b)
 flow c = liftF (Flow c id)
 
 brackets :: Fractional b => BracketType -> TaxComputation b (TaxBracketsM b)
@@ -135,21 +135,28 @@ applyBrackets bt inc = do
 
 applyFedCapGain :: (Ord b, Fractional b) => Money b -> Money b -> TaxComputation b (Money b)
 applyFedCapGain agi invInc = do
-  margRate <- marginalRate Federal agi
+  margRate <- trueMarginalRate Federal agi
   (FedCapitalGainsM topRate bands) <- fedCapGain
   -- we start at top rate and go lower if the given marginal rate is lower than the band rate.  But we shouldn't go up if bands out of order.
-  let f margTaxRate cgTaxRate (CapGainBandM bandRate bandCapGainRate) = if (margTaxRate <= bandRate) then min bandCapGainRate cgTaxRate else cgTaxRate
+  let f margTaxRate cgTaxRate (CapGainBandM bandRate bandCapGainRate) = if (margTaxRate < bandRate) then min bandCapGainRate cgTaxRate else cgTaxRate
       cgr = foldl' (f margRate) topRate bands
   return $ cgr |*| invInc
 
 marginalRate :: (Ord b, Fractional b) => BracketType -> Money b -> TaxComputation b b
 marginalRate bt inc = do
   (TaxBracketsM bkts) <- brackets bt
-  let inBracket x (BracketM b _ _)  = if (x >= b) then True else False
-      inBracket x (TopBracketM b _) = if (x >= b) then True else False
+  let inBracket x (BracketM b _ _)  = (x >= b)
+      inBracket x (TopBracketM b _) = (x >= b)
       rate (BracketM _ _ r)  = r
       rate (TopBracketM _ r) = r
   return $ foldl' (\mr bkt -> if inBracket inc bkt then rate bkt else mr) 0 bkts
+
+trueMarginalRate :: (Ord b, Fractional b) => BracketType -> Money b -> TaxComputation b b
+trueMarginalRate bt (Money x) = do
+  (Money y0) <- applyBrackets bt (Money x)
+  (Money y1) <- applyBrackets bt (Money (x+1))
+  return (y1 - y0)
+
 
 -- zero for now to match old computation
 applyMedSurTax :: forall b. Fractional b => Money b -> Money b -> TaxComputation b (Money b)
@@ -160,7 +167,7 @@ applyMedSurTax magi invInc = do
 
 -- Here is one possible implementation and interpreter using Reader and State
 -- these could also be hard-wired or come from a DB or a SOAP query or a form
-type TaxFlows b = A.Array TaxCategory (TaxFlow b)
+type TaxFlows b = A.Array TaxType (TaxFlow b)
 data TaxEnv b =  TaxEnv { _teRules :: TaxRulesM b, _teFlows :: TaxFlows b }
 
 newtype TaxMonad b a = TaxMonad { unTaxMonad :: Reader (TaxEnv b) a } deriving (Functor, Applicative, Monad, MonadReader (TaxEnv b))
