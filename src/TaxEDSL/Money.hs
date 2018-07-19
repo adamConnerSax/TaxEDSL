@@ -9,6 +9,7 @@
 module TaxEDSL.Money
   (
     Money(..)
+  , moneyZero
   , MoneyAddition(..)
   , MoneyMultiplication(..)
   , MoneyDivision(..)
@@ -16,6 +17,9 @@ module TaxEDSL.Money
 
 data Money a where
   Money :: Fractional a => a -> Money a
+
+moneyZero :: Fractional a => Money a
+moneyZero = Money 0
 
 instance Show a => Show (Money a) where
   show (Money x) = "Money " ++ show x

@@ -3,7 +3,7 @@
 module Main where
 
 import           TaxEDSL.Core        (BracketType (..), CapGainBandM (..),
-                                      FedCapitalGainsM (..),
+                                      FedCapitalGainsM (..), Jurisdiction (..),
                                       MedicareSurtaxM (..), TaxBracketM (..),
                                       TaxBracketsM (..), TaxEnv (..),
                                       TaxFlow (..), TaxFlows (..),
@@ -61,8 +61,8 @@ payrollBrackets :: Fractional b => TaxBracketsM b
 payrollBrackets = TaxBracketsM
   [
     BracketM (Money 0) (Money 117000) 0.062
-  , BracketM (Money 0) (Money 250000) 0.0145
-  , TopBracketM (Money 250000) 0.009
+  , TopBracketM (Money 0) 0.0145 -- medicare
+  , TopBracketM (Money 250000) 0.009 -- medicare additional for high income
   ]
 
 testBrackets :: forall b.Fractional b => A.Array BracketType (TaxBracketsM b)
@@ -79,12 +79,18 @@ testFedCapGainsM :: Fractional b => FedCapitalGainsM b
 testFedCapGainsM = FedCapitalGainsM 0.2 [CapGainBandM 0.25 0, CapGainBandM 0.39 0.15]
 
 testMedSurtax :: forall b.Fractional b => MedicareSurtaxM b
-testMedSurtax = let moneyZ = (Money 0) :: Money b in MedicareSurtaxM 0 0 moneyZ
+testMedSurtax = let moneyZ = (Money 0) :: Money b in MedicareSurtaxM 0 moneyZ
+
+testStandardDeductions :: forall b.Fractional b => A.Array Jurisdiction (Money b)
+testStandardDeductions = let moneyZ = (Money 0) :: Money b in A.listArray (minBound, maxBound) (repeat moneyZ) A.// [] -- can add standard deds here
+
+testSALTCap :: Fractional b => Maybe (Money b)
+testSALTCap = Nothing
 
 testTaxRules :: Fractional b => TaxRulesM b
-testTaxRules = TaxRulesM testBrackets testFedCapGainsM testMedSurtax 0.09
+testTaxRules = TaxRulesM testBrackets testStandardDeductions testSALTCap testFedCapGainsM testMedSurtax 0.09
 
 test x = runTaxMonad (taxReaderProgram x) (TaxEnv testTaxRules testFlows)
 
 main :: IO ()
-main = putStrLn $ "basePolicy: " ++ (show $ test $ basePolicy True)
+main = putStrLn $ "basePolicy: " ++ (show $ test $ basePolicy)

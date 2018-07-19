@@ -6,13 +6,16 @@ module TaxEDSL.TaxPolicies
   ) where
 
 import           TaxEDSL.Core  (BracketType (..), TaxComputation, TaxFlow (..),
-                                TaxFlows (..), TaxType (..), applyBrackets,
-                                applyFedCapGain, applyMedSurTax,
-                                flooredNetCGAndDivs, flooredNetFlow,
-                                flooredNetIncome, flow, grossIncome, inFlow,
-                                runTaxMonad, stateCapGainRate, taxReaderProgram)
+                                TaxFlows (..), TaxType (..),
+                                adjustedGrossIncome, applyBrackets, fedCapGain,
+                                flooredNetFlow, flooredNetInvestmentIncome,
+                                flooredNetNonInvestmentIncome, flow,
+                                grossNonInvestmentIncome, inFlow,
+                                medicareSurtax, runTaxMonad, saltCap,
+                                stateCapGainRate, taxReaderProgram)
 import           TaxEDSL.Money (Money (..), MoneyAddition (..),
-                                MoneyDivision (..), MoneyMultiplication (..))
+                                MoneyDivision (..), MoneyMultiplication (..),
+                                moneyZero)
 
 import           Control.Monad (liftM2)
 
@@ -28,39 +31,40 @@ is lower priority since the disallowing of state & local makes this much less li
 -}
 
 localTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b)
-localTax = flooredNetIncome >>= applyBrackets Local
+localTax = flooredNetNonInvestmentIncome >>= applyBrackets Local
 
 stateTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b)
 stateTax = do
-  stateIncomeTax <- (flooredNetIncome >>= applyBrackets State)
-  stateCapGainTax <- liftM2 (|*|) stateCapGainRate flooredNetCGAndDivs
+  stateIncomeTax <- (flooredNetNonInvestmentIncome >>= applyBrackets State)
+  stateCapGainTax <- liftM2 (|*|) stateCapGainRate flooredNetInvestmentIncome
   return $ stateIncomeTax |+| stateCapGainTax
 
-allTax :: forall b.(Ord b, Fractional b) => Bool -> TaxComputation b (Money b, b)
-allTax deductibleStateAndLocal = do
-  let moneyZ = (Money 0) :: Money b
-
+allTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b, b)
+allTax = do
   stateAndLocalTax <- liftM2 (|+|) localTax stateTax
-  let stateAndLocalDeduction = if deductibleStateAndLocal then stateAndLocalTax else moneyZ
 
-  fni <- flooredNetIncome
-  let fedTaxable = max moneyZ (fni |-| stateAndLocalDeduction)
+  paidSALT <- (deductions <$> flow StateAndLocal)  -- already paid, usually property taxes
+  stateAndLocalDeduction <- do
+    let totalSALT = paidSALT |+| stateAndLocalTax
+    saltCapM <- saltCap
+    return $ maybe totalSALT (min totalSALT) saltCapM
+
+  fni <- flooredNetNonInvestmentIncome
+  let fedTaxable = max moneyZero (fni |-| stateAndLocalDeduction)
   fedIncomeTax <- applyBrackets Federal fedTaxable
-  fncg <- flooredNetCGAndDivs
-  fedCGTax <- applyFedCapGain fedTaxable fncg
-
+  fedCGTax <- fedCapGain
 
   payrollTax <- (inFlow <$> flow OrdinaryIncome) >>= applyBrackets Payroll
   estateTax <- (flooredNetFlow <$> flow Inheritance) >>= applyBrackets Estate
-  grossInc <- grossIncome
+  medSurtax <- medicareSurtax
+  agi <- adjustedGrossIncome
 
-  let totalNITax = stateAndLocalTax |+| fedIncomeTax |+| fedCGTax |+| payrollTax
-      totalNITaxable = fncg |+| grossInc
-      taxRate = if (totalNITaxable > moneyZ) then totalNITax |/| totalNITaxable else (0 :: b)
+  let totalNonEstateTax = stateAndLocalTax |+| fedIncomeTax |+| fedCGTax |+| payrollTax |+| medSurtax
+      taxRate = if (agi > moneyZero) then totalNonEstateTax |/| agi else (0 :: b)
 
-  return $ (totalNITax |+| estateTax, taxRate)
+  return $ (totalNonEstateTax |+| estateTax, taxRate)
 
-basePolicy :: forall b.(Ord b, Fractional b) => Bool -> TaxComputation b (Money b, b)
+basePolicy :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b, b)
 basePolicy = allTax
 
 -- Here is an example
