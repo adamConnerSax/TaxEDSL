@@ -5,14 +5,15 @@ module TaxEDSL.TaxPolicies
     basePolicy
   ) where
 
-import           TaxEDSL.Core  (BracketType (..), TaxComputation, TaxFlow (..),
-                                TaxFlows (..), TaxType (..),
-                                adjustedGrossIncome, applyBrackets, fedCapGain,
-                                flooredNetFlow, flooredNetInvestmentIncome,
-                                flooredNetNonInvestmentIncome, flow,
+import           TaxEDSL.Core  (BracketType (..), Jurisdiction (..),
+                                TaxComputation, TaxFlow (..), TaxFlows (..),
+                                TaxType (..), adjustedGrossIncome,
+                                applyBrackets, deductions, fedCapGain, flow,
                                 grossNonInvestmentIncome, inFlow,
-                                medicareSurtax, runTaxMonad, saltCap,
-                                stateCapGainRate, taxReaderProgram)
+                                medicareSurtax, netFlow, netIncome,
+                                netInvestmentIncome, netNonInvestmentIncome,
+                                runTaxMonad, saltCap, standardDeduction,
+                                sumTaxFlows, taxReaderProgram)
 import           TaxEDSL.Money (Money (..), MoneyAddition (..),
                                 MoneyDivision (..), MoneyMultiplication (..),
                                 moneyZero)
@@ -30,14 +31,19 @@ TODO
 is lower priority since the disallowing of state & local makes this much less likely
 -}
 
+saltTaxable :: (Ord b, Fractional b) => TaxComputation b (Money b)
+saltTaxable = do
+  saltGrossIncome <- sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend]
+  saltItemizedDeductions <- sumTaxFlows deductions [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend]
+  saltStandardDeduction <- standardDeduction StateJ -- assuming localities just use their state standard deduction
+  let saltDeduction = max saltItemizedDeductions saltStandardDeduction
+  return $ max moneyZero (saltGrossIncome |-| saltDeduction)
+
 localTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b)
-localTax = flooredNetNonInvestmentIncome >>= applyBrackets Local
+localTax = saltTaxable >>= applyBrackets Local
 
 stateTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b)
-stateTax = do
-  stateIncomeTax <- (flooredNetNonInvestmentIncome >>= applyBrackets State)
-  stateCapGainTax <- liftM2 (|*|) stateCapGainRate flooredNetInvestmentIncome
-  return $ stateIncomeTax |+| stateCapGainTax
+stateTax = saltTaxable >>= applyBrackets State
 
 allTax :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b, b)
 allTax = do
@@ -49,13 +55,21 @@ allTax = do
     saltCapM <- saltCap
     return $ maybe totalSALT (min totalSALT) saltCapM
 
-  fni <- flooredNetNonInvestmentIncome
-  let fedTaxable = max moneyZero (fni |-| stateAndLocalDeduction)
-  fedIncomeTax <- applyBrackets Federal fedTaxable
-  fedCGTax <- fedCapGain
+  grossNonInvInc <- sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome]
+  grossItemizedDeductions <- sumTaxFlows deductions [OrdinaryIncome, NonPayrollIncome]
+  standardFedDeduction <- standardDeduction FederalJ
+  let fedDeduction = max standardFedDeduction (grossItemizedDeductions |+| stateAndLocalDeduction)
+      fedTaxableIncome = max moneyZero (grossNonInvInc |-| fedDeduction)
+  fedIncomeTax <- applyBrackets Federal fedTaxableIncome
+
+  netInvInc <- sumTaxFlows netFlow [CapitalGain, Dividend]
+  let unusedDeduction = max moneyZero (fedDeduction |-| grossNonInvInc) -- if some deduction went unused we can apply it here
+      capGainTaxable = max moneyZero (netInvInc |-| unusedDeduction)
+  -- uses special CG brackets and only computes tax on amounts in each bracket above the fedTaxableIncome
+  fedCGTax <- fedCapGain fedTaxableIncome capGainTaxable
 
   payrollTax <- (inFlow <$> flow OrdinaryIncome) >>= applyBrackets Payroll
-  estateTax <- (flooredNetFlow <$> flow Inheritance) >>= applyBrackets Estate
+  estateTax <- (max moneyZero . netFlow <$> flow Inheritance) >>= applyBrackets Estate
   medSurtax <- medicareSurtax
   agi <- adjustedGrossIncome
 

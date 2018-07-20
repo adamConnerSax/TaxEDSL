@@ -3,13 +3,14 @@
 module Main where
 
 import           TaxEDSL.Core        (BracketType (..), CapGainBandM (..),
-                                      FedCapitalGainsM (..), Jurisdiction (..),
+                                      FedCapGainsM (..), Jurisdiction (..),
                                       MedicareSurtaxM (..), TaxBracketM (..),
                                       TaxBracketsM (..), TaxEnv (..),
                                       TaxFlow (..), TaxFlows (..),
-                                      TaxRulesM (..), TaxType (..), runTaxMonad,
+                                      TaxRulesM (..), TaxType (..),
+                                      capGainBandsToBrackets, runTaxMonad,
                                       taxReaderProgram)
-import           TaxEDSL.Money       (Money (..))
+import           TaxEDSL.Money       (Money (..), moneyZero)
 import           TaxEDSL.TaxPolicies (basePolicy)
 
 import qualified Data.Array          as A
@@ -65,30 +66,36 @@ payrollBrackets = TaxBracketsM
   , TopBracketM (Money 250000) 0.009 -- medicare additional for high income
   ]
 
-testBrackets :: forall b.Fractional b => A.Array BracketType (TaxBracketsM b)
-testBrackets = let moneyZ = (Money 0) :: Money b in A.array (minBound, maxBound)
+testFedCapGainsM :: Fractional b => FedCapGainsM b
+testFedCapGainsM = FedCapGainsM 0.2 [CapGainBandM 0.25 0, CapGainBandM 0.39 0.15]
+
+testFedCGBrackets :: (Ord b, Fractional b) => TaxBracketsM b
+testFedCGBrackets = capGainBandsToBrackets testFedCapGainsM fedBrackets
+
+
+testBrackets :: (Ord b, Fractional b) => A.Array BracketType (TaxBracketsM b)
+testBrackets = A.array (minBound, maxBound)
   [
     (Federal, fedBrackets)
+  , (FedCG, testFedCGBrackets)
   , (State, stateBrackets)
   , (Local, cityBrackets)
   , (Payroll, payrollBrackets)
   , (Estate, TaxBracketsM [])
   ]
 
-testFedCapGainsM :: Fractional b => FedCapitalGainsM b
-testFedCapGainsM = FedCapitalGainsM 0.2 [CapGainBandM 0.25 0, CapGainBandM 0.39 0.15]
 
-testMedSurtax :: forall b.Fractional b => MedicareSurtaxM b
-testMedSurtax = let moneyZ = (Money 0) :: Money b in MedicareSurtaxM 0 moneyZ
+testMedSurtax :: Fractional b => MedicareSurtaxM b
+testMedSurtax = MedicareSurtaxM 0 moneyZero
 
-testStandardDeductions :: forall b.Fractional b => A.Array Jurisdiction (Money b)
-testStandardDeductions = let moneyZ = (Money 0) :: Money b in A.listArray (minBound, maxBound) (repeat moneyZ) A.// [] -- can add standard deds here
+testStandardDeductions :: Fractional b => A.Array Jurisdiction (Money b)
+testStandardDeductions = A.listArray (minBound, maxBound) (repeat moneyZero) A.// [] -- can add standard deds here
 
 testSALTCap :: Fractional b => Maybe (Money b)
 testSALTCap = Nothing
 
-testTaxRules :: Fractional b => TaxRulesM b
-testTaxRules = TaxRulesM testBrackets testStandardDeductions testSALTCap testFedCapGainsM testMedSurtax 0.09
+testTaxRules :: (Ord b, Fractional b) => TaxRulesM b
+testTaxRules = TaxRulesM testBrackets testStandardDeductions testSALTCap testMedSurtax
 
 test x = runTaxMonad (taxReaderProgram x) (TaxEnv testTaxRules testFlows)
 
