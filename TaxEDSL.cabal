@@ -20,6 +20,7 @@ library
                      , TaxEDSL.Money
                      , TaxEDSL.TaxPolicies
   build-depends:       base >= 4.7 && < 5
+                     , aeson
                      , containers
                      , free
                      , array

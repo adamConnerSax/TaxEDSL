@@ -6,6 +6,8 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 module TaxEDSL.Core
   (
     TaxFlow(..)
@@ -52,12 +54,15 @@ import qualified Data.Array           as A
 import           Data.Ix              (Ix)
 
 import           Data.Foldable        (foldl')
+import GHC.Generics (Generic)
 import           Prelude              hiding ((<*>))
+
+import Data.Aeson (ToJSON, FromJSON)
 
 -- These will come from here
 data TaxType = NonPayrollIncome | OrdinaryIncome | CapitalGain | Dividend | ExemptInterest | Inheritance | StateAndLocal deriving (Show, Enum, Eq, Bounded, Ord, Ix)
 data BracketType = Federal | FedCG | State | Local | Payroll | Estate deriving (Show, Bounded, Eq, Ord, Enum, Ix) -- Payroll does Social Security and Medicare taxes
-data Jurisdiction = FederalJ | StateJ deriving (Show, Bounded, Eq, Ord, Enum, Ix)
+data Jurisdiction = FederalJ | StateJ deriving (Show, Bounded, Eq, Ord, Enum, Ix, Generic, ToJSON, FromJSON)
 
 
 -- These will be exported so things can be converted to them
