@@ -100,4 +100,4 @@ testTaxRules = TaxRulesM testBrackets testStandardDeductions testSALTCap testMed
 test x = runTaxMonad (taxReaderProgram x) (TaxEnv testTaxRules testFlows)
 
 main :: IO ()
-main = putStrLn $ "basePolicy: " ++ (show $ test $ basePolicy)
+main = putStrLn $ "basePolicy: " ++ (show $ test basePolicy)
