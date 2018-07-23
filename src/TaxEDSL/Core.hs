@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GADTs                      #-}
@@ -5,9 +6,8 @@
 {-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
 module TaxEDSL.Core
   (
     TaxFlow(..)
@@ -54,16 +54,25 @@ import qualified Data.Array           as A
 import           Data.Ix              (Ix)
 
 import           Data.Foldable        (foldl')
-import GHC.Generics (Generic)
+import           GHC.Generics         (Generic)
 import           Prelude              hiding ((<*>))
 
-import Data.Aeson (ToJSON, FromJSON)
+import           Data.Aeson           (FromJSON (parseJSON), ToJSON (toJSON),
+                                       defaultOptions, genericParseJSON,
+                                       genericToJSON)
 
 -- These will come from here
 data TaxType = NonPayrollIncome | OrdinaryIncome | CapitalGain | Dividend | ExemptInterest | Inheritance | StateAndLocal deriving (Show, Enum, Eq, Bounded, Ord, Ix)
 data BracketType = Federal | FedCG | State | Local | Payroll | Estate deriving (Show, Bounded, Eq, Ord, Enum, Ix) -- Payroll does Social Security and Medicare taxes
-data Jurisdiction = FederalJ | StateJ deriving (Show, Bounded, Eq, Ord, Enum, Ix, Generic, ToJSON, FromJSON)
+data Jurisdiction = FederalJ | StateJ deriving (Show, Bounded, Eq, Ord, Enum, Generic) --, ToJSON, FromJSON)
 
+deriving instance Ix Jurisdiction
+
+instance ToJSON Jurisdiction where
+  toJSON = genericToJSON defaultOptions
+
+instance FromJSON Jurisdiction where
+  parseJSON = genericParseJSON defaultOptions
 
 -- These will be exported so things can be converted to them
 data CapGainBandM a = CapGainBandM { marginalRateM :: a, capGainRateM :: a } deriving (Show) -- just for conversion to CG bracket

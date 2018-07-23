@@ -81,4 +81,3 @@ allTax = do
 basePolicy :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b, b)
 basePolicy = allTax
 
--- Here is an example
