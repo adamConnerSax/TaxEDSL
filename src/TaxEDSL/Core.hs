@@ -16,8 +16,6 @@ module TaxEDSL.Core
   , Jurisdiction(..)
   , TaxBracketsM(..)
   , TaxBracketM(..)
-  , FedCapGainsM(..)
-  , CapGainBandM(..)
   , MedicareSurtaxM(..)
   , TaxRulesM(..)
   , TaxComputation
@@ -31,7 +29,6 @@ module TaxEDSL.Core
   , standardDeduction
   , saltCap
   , medSurtaxInfo
-  , capGainBandsToBrackets
   , applyBrackets
   , fedCapGain
   , taxReaderProgram
@@ -67,8 +64,8 @@ instance FromJSON Jurisdiction where
   parseJSON = genericParseJSON defaultOptions
 
 -- These will be exported so things can be converted to them
-data CapGainBandM a = CapGainBandM { marginalRateM :: a, capGainRateM :: a } deriving (Show) -- just for conversion to CG bracket
-data FedCapGainsM a = FedCapGainsM { topRate :: a, bands :: [CapGainBandM a] } -- just for conversion to CG bracket
+--data CapGainBandM a = CapGainBandM { marginalRateM :: a, capGainRateM :: a } deriving (Show) -- just for conversion to CG bracket
+--data FedCapGainsM a = FedCapGainsM { topRate :: a, bands :: [CapGainBandM a] } -- just for conversion to CG bracket
 
 data TaxBracketM a = BracketM (Money a) (Money a) a | TopBracketM (Money a) a deriving (Show)
 data TaxBracketsM a = TaxBracketsM ![TaxBracketM a] deriving (Show) -- we don't expose this constructor
@@ -125,6 +122,7 @@ saltCap :: Fractional b => TaxComputation b (Maybe (Money b))
 saltCap = liftF (SALTCap id)
 
 -- utilities
+{-
 capGainBandsToBrackets :: (Fractional b, Ord b) => FedCapGainsM b -> TaxBracketsM b -> TaxBracketsM b
 capGainBandsToBrackets (FedCapGainsM topR bands) (TaxBracketsM brackets) =
   let g bktRate x (CapGainBandM mr cgr) = if (bktRate < mr) && (cgr < x) then cgr else x
@@ -132,7 +130,7 @@ capGainBandsToBrackets (FedCapGainsM topR bands) (TaxBracketsM brackets) =
       newBracket (BracketM b t r)  = BracketM b t (f r)
       newBracket (TopBracketM b r) = TopBracketM b (f r)
   in TaxBracketsM (newBracket <$> brackets)
-
+-}
 -- helpers
 -- specialize a fold for combining tax flows
 onTaxFlows :: Fractional b => (TaxFlow b -> c) -> (c -> c -> c) -> c -> [TaxType] -> TaxComputation b c

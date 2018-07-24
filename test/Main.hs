@@ -2,13 +2,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import           TaxEDSL.Core        (BracketType (..), CapGainBandM (..),
-                                      FedCapGainsM (..), Jurisdiction (..),
+import           TaxEDSL.Core        (BracketType (..), Jurisdiction (..),
                                       MedicareSurtaxM (..), TaxBracketM (..),
                                       TaxBracketsM (..), TaxEnv (..),
                                       TaxFlow (..), TaxFlows (..),
-                                      TaxRulesM (..), TaxType (..),
-                                      capGainBandsToBrackets, runTaxMonad,
+                                      TaxRulesM (..), TaxType (..), runTaxMonad,
                                       taxReaderProgram)
 import           TaxEDSL.Money       (Money (..), moneyZero)
 import           TaxEDSL.TaxPolicies (basePolicy)
@@ -68,12 +66,15 @@ payrollBrackets = TaxBracketsM
   , TopBracketM (Money 250000) 0.009 -- medicare additional for high income
   ]
 
-testFedCapGainsM :: Fractional b => FedCapGainsM b
-testFedCapGainsM = FedCapGainsM 0.2 [CapGainBandM 0.25 0, CapGainBandM 0.39 0.15]
+--testFedCapGainsM :: Fractional b => FedCapGainsM b
+--testFedCapGainsM = FedCapGainsM 0.2 [CapGainBandM 0.25 0, CapGainBandM 0.39 0.15]
 
-testFedCGBrackets :: (Ord b, Fractional b) => TaxBracketsM b
-testFedCGBrackets = capGainBandsToBrackets testFedCapGainsM fedBrackets
-
+testFedCGBrackets :: Fractional b => TaxBracketsM b
+testFedCGBrackets = TaxBracketsM
+  [
+    BracketM (Money 72500) (Money 450000) 0.15
+  , TopBracketM (Money 450000) 0.2
+  ]
 
 testBrackets :: (Ord b, Fractional b) => A.Array BracketType (TaxBracketsM b)
 testBrackets = A.array (minBound, maxBound)
