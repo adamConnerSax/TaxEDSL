@@ -6,14 +6,12 @@ module TaxEDSL.TaxPolicies
   ) where
 
 import           TaxEDSL.Core  (BracketType (..), Jurisdiction (..),
-                                TaxComputation, TaxFlow (..), TaxFlows (..),
-                                TaxType (..), adjustedGrossIncome,
+                                MedicareSurtaxM (..), TaxComputation,
+                                TaxFlow (..), TaxFlows (..), TaxType (..),
                                 applyBrackets, deductions, fedCapGain, flow,
-                                grossNonInvestmentIncome, inFlow,
-                                medicareSurtax, netFlow, netIncome,
-                                netInvestmentIncome, netNonInvestmentIncome,
-                                runTaxMonad, saltCap, standardDeduction,
-                                sumTaxFlows, taxReaderProgram)
+                                medSurtaxInfo, netFlow, runTaxMonad, saltCap,
+                                standardDeduction, sumTaxFlows,
+                                taxReaderProgram)
 import           TaxEDSL.Money (Money (..), MoneyAddition (..),
                                 MoneyDivision (..), MoneyMultiplication (..),
                                 moneyZero)
@@ -30,6 +28,16 @@ TODO
 3. Add AMT and use it when required/better (will AMT require some "memory"?  Will we need to know that we did AMT in the previous year?).  This
 is lower priority since the disallowing of state & local makes this much less likely
 -}
+
+medicareSurtax :: forall b. (Fractional b, Ord b) => TaxComputation b (Money b)
+medicareSurtax = do
+  let moneyZ = (Money 0) :: Money b
+  (MedicareSurtaxM rate magiThreshold) <- medSurtaxInfo
+  modifiedAGI <- sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend, ExemptInterest]
+  netInvestmentIncome <- max moneyZero <$> sumTaxFlows netFlow [CapitalGain, Dividend, NonPayrollIncome]
+  let medSTaxable = min netInvestmentIncome (max moneyZ (modifiedAGI |-| magiThreshold))
+  return $ rate |*| medSTaxable
+
 
 saltTaxable :: (Ord b, Fractional b) => TaxComputation b (Money b)
 saltTaxable = do
@@ -62,16 +70,16 @@ allTax = do
       fedTaxableIncome = max moneyZero (grossNonInvInc |-| fedDeduction)
   fedIncomeTax <- applyBrackets Federal fedTaxableIncome
 
-  netInvInc <- sumTaxFlows netFlow [CapitalGain, Dividend]
+  netCapGains <- sumTaxFlows netFlow [CapitalGain, Dividend]
   let unusedDeduction = max moneyZero (fedDeduction |-| grossNonInvInc) -- if some deduction went unused we can apply it here
-      capGainTaxable = max moneyZero (netInvInc |-| unusedDeduction)
+      capGainTaxable = max moneyZero (netCapGains |-| unusedDeduction)
   -- uses special CG brackets and only computes tax on amounts in each bracket above the fedTaxableIncome
   fedCGTax <- fedCapGain fedTaxableIncome capGainTaxable
 
   payrollTax <- (inFlow <$> flow OrdinaryIncome) >>= applyBrackets Payroll
   estateTax <- (max moneyZero . netFlow <$> flow Inheritance) >>= applyBrackets Estate
   medSurtax <- medicareSurtax
-  agi <- adjustedGrossIncome
+  agi <- sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend, ExemptInterest]
 
   let totalNonEstateTax = stateAndLocalTax |+| fedIncomeTax |+| fedCGTax |+| payrollTax |+| medSurtax
       taxRate = if (agi > moneyZero) then totalNonEstateTax |/| agi else (0 :: b)

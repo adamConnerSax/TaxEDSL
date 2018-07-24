@@ -26,13 +26,6 @@ module TaxEDSL.Core
   , netFlow
   , sumTaxFlows
   , flooredNetFlow
-  , netIncome
-  , adjustedGrossIncome
-  , modifiedAGI
-  , netNonInvestmentIncome
-  , grossNonInvestmentIncome
-  , netInvestmentIncome
-  , grossInvestmentIncome
   , flow
   , brackets
   , standardDeduction
@@ -41,7 +34,6 @@ module TaxEDSL.Core
   , capGainBandsToBrackets
   , applyBrackets
   , fedCapGain
-  , medicareSurtax
   , taxReaderProgram
   , runTaxMonad
   )  where
@@ -150,28 +142,6 @@ onTaxFlows fEach combine initial types = foldl' combine initial <$> (sequence . 
 sumTaxFlows :: Fractional b => (TaxFlow b -> Money b) -> [TaxType] -> TaxComputation b (Money b)
 sumTaxFlows toMoney types = onTaxFlows toMoney (|+|) moneyZero types
 
-netIncome :: (Ord b, Fractional b) => TaxComputation b (Money b)
-netIncome = max moneyZero <$> sumTaxFlows netFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend]
-
-adjustedGrossIncome :: Fractional b => TaxComputation b (Money b)
-adjustedGrossIncome = sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend]
-
-modifiedAGI :: Fractional b => TaxComputation b (Money b)
-modifiedAGI = sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend, ExemptInterest]
-
-netNonInvestmentIncome :: (Ord b, Fractional b) => TaxComputation b (Money b)
-netNonInvestmentIncome = max moneyZero <$> sumTaxFlows netFlow [OrdinaryIncome, NonPayrollIncome]
-
-grossNonInvestmentIncome :: (Ord b, Fractional b) => TaxComputation b (Money b)
-grossNonInvestmentIncome = sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome]
-
-grossInvestmentIncome :: (Ord b, Fractional b) => TaxComputation b (Money b)
-grossInvestmentIncome = sumTaxFlows inFlow [CapitalGain, Dividend, ExemptInterest]
-
-netInvestmentIncome :: (Ord b, Fractional b) => TaxComputation b (Money b)
-netInvestmentIncome = max moneyZero <$> sumTaxFlows netFlow [CapitalGain, Dividend]
-
-
 -- compute tax from income but allow an offset of untaxed income which pushes up brackets but is not taxed
 -- this will be 0 for ordinary bracket use but for a cap gain calculation, income will be sum of non-investment and cap gain
 -- with the non-investment used as an offset since it's already been taxed at income tax rates
@@ -192,15 +162,6 @@ applyBrackets bt inc = applyBracketsGeneral bt moneyZero inc
 
 fedCapGain :: (Ord b, Fractional b) => Money b -> Money b -> TaxComputation b (Money b)
 fedCapGain netNonInv netInv = applyBracketsGeneral FedCG netNonInv (netNonInv |+| netInv)
-
-medicareSurtax :: forall b. (Fractional b, Ord b) => TaxComputation b (Money b)
-medicareSurtax = do
-  let moneyZ = (Money 0) :: Money b
-  (MedicareSurtaxM rate magiThreshold) <- medSurtaxInfo
-  magi <- modifiedAGI
-  invInc <- netInvestmentIncome
-  let medSTaxable = min invInc (max moneyZ (magi |-| magiThreshold))
-  return $ rate |*| medSTaxable
 
 -- Here is one possible implementation and interpreter using Reader
 -- these could also be hard-wired or come from a DB or a SOAP query or a form
