@@ -127,7 +127,7 @@ saltCap = liftF (SALTCap id)
 -- utilities
 capGainBandsToBrackets :: (Fractional b, Ord b) => FedCapGainsM b -> TaxBracketsM b -> TaxBracketsM b
 capGainBandsToBrackets (FedCapGainsM topR bands) (TaxBracketsM brackets) =
-  let g bktRate x (CapGainBandM mr cgr) = if (bktRate <= mr) && (cgr < x) then cgr else x
+  let g bktRate x (CapGainBandM mr cgr) = if (bktRate < mr) && (cgr < x) then cgr else x
       f bktRate = foldl' (g bktRate) topR bands
       newBracket (BracketM b t r)  = BracketM b t (f r)
       newBracket (TopBracketM b r) = TopBracketM b (f r)

@@ -19,9 +19,11 @@ import qualified Data.Array          as A
 testFlows :: Fractional b => TaxFlows b
 testFlows = let f = Money in A.listArray (minBound, maxBound) (repeat (TaxFlow (f 0.0) (f 0.0))) A.//
   [
-    (OrdinaryIncome, TaxFlow (f 1000000.0) (f 0.0))
-  , (CapitalGain, TaxFlow (f 25000) (f 0))
+    (NonPayrollIncome, TaxFlow (Money 50000) (Money 0))
   ]
+
+emptyBrackets :: TaxBracketsM b
+emptyBrackets = TaxBracketsM []
 
 fedBrackets :: Fractional b => TaxBracketsM b
 fedBrackets = TaxBracketsM
@@ -78,9 +80,9 @@ testBrackets = A.array (minBound, maxBound)
   [
     (Federal, fedBrackets)
   , (FedCG, testFedCGBrackets)
-  , (State, stateBrackets)
-  , (Local, cityBrackets)
-  , (Payroll, payrollBrackets)
+  , (State, emptyBrackets) --stateBrackets)
+  , (Local, emptyBrackets) --cityBrackets)
+  , (Payroll, emptyBrackets) --payrollBrackets)
   , (Estate, TaxBracketsM [])
   ]
 
