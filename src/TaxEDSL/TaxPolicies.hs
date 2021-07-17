@@ -23,9 +23,8 @@ import           Control.Monad (liftM2)
 This implementation matches what's in FinanciaMC plus (NOT YET) the medicare surtax on investment income.
 It does not account for AMT or the possibility of taking standard deductions.
 TODO
-1. Add Medicare surtax on investment income (easy)
-2. Add standard deductions and choose correctly between itemized and standard (requires adding standard deduction data to inputs)
-3. Add AMT and use it when required/better (will AMT require some "memory"?  Will we need to know that we did AMT in the previous year?).  This
+1. Add standard deductions and choose correctly between itemized and standard (requires adding standard deduction data to inputs)
+2. Add AMT and use it when required/better (will AMT require some "memory"?  Will we need to know that we did AMT in the previous year?).  This
 is lower priority since the disallowing of state & local makes this much less likely
 -}
 
@@ -38,7 +37,7 @@ medicareSurtax = do
   let medSTaxable = min netInvestmentIncome (max moneyZ (modifiedAGI |-| magiThreshold))
   return $ rate |*| medSTaxable
 
-
+-- NB: This includes divs and cap gains since they are often taxed as income for state tax purposes
 saltTaxable :: (Ord b, Fractional b) => TaxComputation b (Money b)
 saltTaxable = do
   saltGrossIncome <- sumTaxFlows inFlow [OrdinaryIncome, NonPayrollIncome, CapitalGain, Dividend]
@@ -88,4 +87,3 @@ allTax = do
 
 basePolicy :: forall b.(Ord b, Fractional b) => TaxComputation b (Money b, b)
 basePolicy = allTax
-
